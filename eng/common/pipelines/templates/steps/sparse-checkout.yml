@@ -15,7 +15,14 @@ parameters:
 steps:
   - ${{ if not(parameters.SkipCheckoutNone) }}:
       - checkout: none
-
+  - pwsh: |
+      Write-Host "##vso[task.setvariable variable=githubLinkPrefix]https://github.com/"
+    displayName: Set github link prefix without PAT
+    condition: eq(variables['azuresdk-github-pat'], '')
+  - pwsh: |
+      Write-Host "##vso[task.setvariable variable=githubLinkPrefix]https://$(azuresdk-github-pat)@github.com/"
+    displayName: Set github link prefix with PAT
+    condition: ne(variables['azuresdk-github-pat'], '')
   - task: PowerShell@2
     displayName: 'Sparse checkout repositories'
     inputs:
@@ -23,7 +30,7 @@ steps:
       # Define this inline, because of the chicken/egg problem with loading a script when nothing
       # has been checked out yet.
       script: |
-        function SparseCheckout([Array]$paths, [Hashtable]$repository)
+        function SparseCheckout([Array]$paths, [Hashtable]$repository, [string]$gitLinkPrefix)
         {
             $dir = $repository.WorkingDirectory
             if (!$dir) {
@@ -39,11 +46,11 @@ steps:
               Write-Host "Repository $($repository.Name) is being initialized."
 
               if ($repository.Commitish -match '^refs/pull/\d+/merge$') {
-                Write-Host "git clone --no-checkout --filter=tree:0 -c remote.origin.fetch='+$($repository.Commitish):refs/remotes/origin/$($repository.Commitish)' https://github.com/$($repository.Name) ."
-                git clone --no-checkout --filter=tree:0 -c remote.origin.fetch=''+$($repository.Commitish):refs/remotes/origin/$($repository.Commitish)'' https://github.com/$($repository.Name) .
+                Write-Host "git clone --no-checkout --filter=tree:0 -c remote.origin.fetch='+$($repository.Commitish):refs/remotes/origin/$($repository.Commitish)' $gitLink ."
+                git clone --no-checkout --filter=tree:0 -c remote.origin.fetch=''+$($repository.Commitish):refs/remotes/origin/$($repository.Commitish)'' $gitLink .
               } else {
-                Write-Host "git clone --no-checkout --filter=tree:0 https://github.com/$($repository.Name) ."
-                git clone --no-checkout --filter=tree:0 https://github.com/$($repository.Name) .
+                Write-Host "git clone --no-checkout --filter=tree:0 $gitLink ."
+                git clone --no-checkout --filter=tree:0 $gitLink .
               }
 
               Write-Host "git sparse-checkout init"
@@ -82,7 +89,8 @@ steps:
         # Replace windows backslash paths, as Azure Pipelines default directories are sometimes formatted like 'D:\a\1\s'
         $repositories = '${{ convertToJson(parameters.Repositories) }}' -replace '\\', '/' | ConvertFrom-Json -AsHashtable
         foreach ($repo in $Repositories) {
-          SparseCheckout $paths $repo
+          $gitLink = "$(githubLinkPrefix)$($repo.Name).git"
+          SparseCheckout $paths $repo $gitLink
         }
       pwsh: true
       workingDirectory: $(System.DefaultWorkingDirectory)
